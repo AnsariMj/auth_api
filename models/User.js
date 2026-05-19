@@ -19,7 +19,7 @@ const userSchema = new mongoose.Schema(
     tenant: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Tenant",
-      required: true,
+      default: null,
     },
     role: {
       type: String,
@@ -37,10 +37,24 @@ const userSchema = new mongoose.Schema(
     lastLogin: {
       type: Date,
     },
+    emailVerified: {
+      type: Boolean,
+      default: false,
+    },
+
+    emailVerificationOtp: String,
+
+    emailVerificationOtpExpire: Date,
+
+    forgotPasswordOtp: String,
+
+    forgotPasswordOtpExpire: Date,
+
+    lastLogin: Date,
   },
   {
     timestamps: true,
-  }
+  },
 );
 
 // Compound unique index for email per tenant

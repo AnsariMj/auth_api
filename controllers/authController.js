@@ -4,7 +4,8 @@ const asyncHandler = require("express-async-handler");
 const { default: axios } = require("axios");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
-
+const sendEmail = require("../utils/sendEmail");
+const welcomeEmail = require("../utils/emailTemplates/welcomeEmail");
 // Generate JWT Token
 const generateToken = (id, tenantId) => {
   return jwt.sign({ id, tenantId }, process.env.JWT_SECRET, {
@@ -60,10 +61,10 @@ const registerUser = asyncHandler(async (req, res) => {
 
   // Create user
   const hashedPassword = await bcrypt.hash(userPassword, 10);
-  
+
   // If tenant has no owner yet, first user becomes admin
   const role = !tenant.owner ? "admin" : "user";
-  
+
   const user = await User.create({
     userName,
     userEmail,
@@ -78,6 +79,13 @@ const registerUser = asyncHandler(async (req, res) => {
   }
 
   const token = generateToken(user._id, tenant._id);
+
+  // SEND WELCOME EMAIL
+  await sendEmail({
+    email: user.userEmail,
+    subject: "Welcome to Ansari Tech",
+    message: welcomeEmail(user.userName),
+  });
 
   res.status(201).json({
     message: "User registered successfully",
@@ -153,18 +161,156 @@ const loginUser = asyncHandler(async (req, res) => {
       userName: user.userName,
       userEmail: user.userEmail,
       role: user.role,
-      tenant: tenant ? {
-        id: tenant._id,
-        tenantName: tenant.tenantName,
-        tenantSlug: tenant.tenantSlug,
-      } : null,
+      tenant: tenant
+        ? {
+            id: tenant._id,
+            tenantName: tenant.tenantName,
+            tenantSlug: tenant.tenantSlug,
+          }
+        : null,
     },
+  });
+});
+
+// ============================================
+// FORGOT PASSWORD
+// ============================================
+
+const forgotPassword = asyncHandler(async (req, res) => {
+  const { userEmail } = req.body;
+
+  if (!userEmail) {
+    return res.status(400).json({
+      message: "Email is required",
+    });
+  }
+
+  const user = await User.findOne({ userEmail });
+
+  if (!user) {
+    return res.status(404).json({
+      message: "User not found",
+    });
+  }
+
+  // GENERATE OTP
+  const otp = Math.floor(100000 + Math.random() * 900000).toString();
+
+  user.forgotPasswordOtp = otp;
+  user.forgotPasswordOtpExpire = Date.now() + 10 * 60 * 1000;
+
+  await user.save();
+
+  // SEND EMAIL
+  await sendEmail({
+    email: user.userEmail,
+    subject: "Forgot Password OTP",
+    message: forgotPasswordOtpEmail(otp),
+  });
+
+  res.status(200).json({
+    message: "OTP sent successfully",
+  });
+});
+
+// ============================================
+// VERIFY OTP
+// ============================================
+
+const verifyForgotPasswordOtp = asyncHandler(async (req, res) => {
+  const { userEmail, otp } = req.body;
+
+  if (!userEmail || !otp) {
+    return res.status(400).json({
+      message: "Email and OTP are required",
+    });
+  }
+
+  const user = await User.findOne({ userEmail });
+
+  if (!user) {
+    return res.status(404).json({
+      message: "User not found",
+    });
+  }
+
+  if (user.forgotPasswordOtp !== otp) {
+    return res.status(400).json({
+      message: "Invalid OTP",
+    });
+  }
+
+  if (user.forgotPasswordOtpExpire < Date.now()) {
+    return res.status(400).json({
+      message: "OTP expired",
+    });
+  }
+
+  res.status(200).json({
+    message: "OTP verified successfully",
+  });
+});
+
+// ============================================
+// RESET PASSWORD
+// ============================================
+
+const resetPassword = asyncHandler(async (req, res) => {
+  const { userEmail, otp, newPassword } = req.body;
+
+  if (!userEmail || !otp || !newPassword) {
+    return res.status(400).json({
+      message: "Please provide all fields",
+    });
+  }
+
+  const user = await User.findOne({ userEmail });
+
+  if (!user) {
+    return res.status(404).json({
+      message: "User not found",
+    });
+  }
+
+  if (user.forgotPasswordOtp !== otp) {
+    return res.status(400).json({
+      message: "Invalid OTP",
+    });
+  }
+
+  if (user.forgotPasswordOtpExpire < Date.now()) {
+    return res.status(400).json({
+      message: "OTP expired",
+    });
+  }
+
+  const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+  user.userPassword = hashedPassword;
+
+  user.forgotPasswordOtp = null;
+  user.forgotPasswordOtpExpire = null;
+
+  await user.save();
+
+  // SEND PASSWORD CHANGED EMAIL
+  await sendEmail({
+    email: user.userEmail,
+    subject: "Password Changed Successfully",
+    message: passwordChangedEmail(user.userName),
+  });
+
+  res.status(200).json({
+    message: "Password reset successfully",
   });
 });
 
 // Get Current User
 const getCurrentUser = asyncHandler(async (req, res) => {
-  const user = await User.findById(req.user.id).populate("tenant", "tenantName tenantSlug");
+  const user = await User.findById(req.user.id).populate(
+    "tenant",
+    "tenantName tenantSlug",
+  );
 
   if (!user) {
     return res.status(404).json({
@@ -212,6 +358,13 @@ const updatePassword = asyncHandler(async (req, res) => {
 
   user.userPassword = await bcrypt.hash(newPassword, 10);
   await user.save();
+
+  // SEND EMAIL
+  await sendEmail({
+    email: user.userEmail,
+    subject: "Password Updated",
+    message: passwordChangedEmail(user.userName),
+  });
 
   res.status(200).json({
     message: "Password updated successfully",
@@ -271,7 +424,7 @@ const updateUserProfile = asyncHandler(async (req, res) => {
   const user = await User.findByIdAndUpdate(
     req.user.id,
     { userName },
-    { new: true, runValidators: true }
+    { new: true, runValidators: true },
   );
 
   res.status(200).json({
@@ -296,7 +449,10 @@ const verifyToken = asyncHandler(async (req, res) => {
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    const user = await User.findById(decoded.id).populate("tenant", "tenantName tenantSlug");
+    const user = await User.findById(decoded.id).populate(
+      "tenant",
+      "tenantName tenantSlug",
+    );
 
     if (!user) {
       return res.status(404).json({

@@ -56,10 +56,20 @@ const tenantSchema = new mongoose.Schema(
         default: false,
       },
     },
+    isActive: {
+      type: Boolean,
+      default: true,
+    },
+
+    subscriptionStatus: {
+      type: String,
+      enum: ["active", "expired", "cancelled"],
+      default: "active",
+    },
   },
   {
     timestamps: true,
-  }
+  },
 );
 
 const Tenant = mongoose.model("Tenant", tenantSchema);
