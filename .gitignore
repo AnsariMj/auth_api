@@ -39,5 +39,3 @@ coverage/
 tmp/
 temp/
 
-# Ignore all files in the public directory except for the ones in public/assets
-seed.js

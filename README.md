@@ -130,7 +130,8 @@ Content-Type: application/json
   "tenantName": "Acme Corporation",
   "tenantSlug": "acme-corp",
   "description": "Our company",
-  "website": "https://acme.com"
+  "website": "https://acme.com",
+  "ownerEmail": "john@acme.com"
 }
 ```
 
