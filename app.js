@@ -1,4 +1,6 @@
 const express = require("express");
+const swaggerUi = require("swagger-ui-express");
+const specs = require("./config/swagger");
 const dbConnect = require("./database/dbConnect");
 const app = express();
 
@@ -10,6 +12,9 @@ const tenantRoutes = require("./routes/tenantRoutes");
 // Middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Swagger Documentation
+app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(specs));
 
 dbConnect();
 
