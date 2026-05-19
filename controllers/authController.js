@@ -6,6 +6,9 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const sendEmail = require("../utils/sendEmail");
 const welcomeEmail = require("../utils/emailTemplates/welcomeEmail");
+const passwordChangedEmail = require("../utils/emailTemplates/passwordChangedEmail");
+const isPasswordReused = require("../utils/isPasswordReused");
+
 // Generate JWT Token
 const generateToken = (id, tenantId) => {
   return jwt.sign({ id, tenantId }, process.env.JWT_SECRET, {
@@ -172,9 +175,7 @@ const loginUser = asyncHandler(async (req, res) => {
   });
 });
 
-// ============================================
 // FORGOT PASSWORD
-// ============================================
 
 const forgotPassword = asyncHandler(async (req, res) => {
   const { userEmail } = req.body;
@@ -213,9 +214,7 @@ const forgotPassword = asyncHandler(async (req, res) => {
   });
 });
 
-// ============================================
 // VERIFY OTP
-// ============================================
 
 const verifyForgotPasswordOtp = asyncHandler(async (req, res) => {
   const { userEmail, otp } = req.body;
@@ -251,9 +250,7 @@ const verifyForgotPasswordOtp = asyncHandler(async (req, res) => {
   });
 });
 
-// ============================================
 // RESET PASSWORD
-// ============================================
 
 const resetPassword = asyncHandler(async (req, res) => {
   const { userEmail, otp, newPassword } = req.body;
@@ -335,20 +332,31 @@ const getCurrentUser = asyncHandler(async (req, res) => {
 const updatePassword = asyncHandler(async (req, res) => {
   const { oldPassword, newPassword, confirmPassword } = req.body;
 
+  // CHECK IF ALL FIELDS ARE PROVIDED
   if (!oldPassword || !newPassword || !confirmPassword) {
     return res.status(400).json({
       message: "Please provide old and new password",
     });
   }
 
+  // CHECK IF NEW PASSWORDS DOES'T MATCH
   if (newPassword !== confirmPassword) {
     return res.status(400).json({
       message: "Passwords do not match",
     });
   }
 
+  // Fetch user with password and password history
   const user = await User.findById(req.user.id).select("+userPassword");
 
+  // CHECK IF USER EXISTS
+  if (!user) {
+    return res.status(404).json({
+      message: "User not found",
+    });
+  }
+
+  // CHECK OLD PASSWORD
   const isPasswordMatch = await bcrypt.compare(oldPassword, user.userPassword);
   if (!isPasswordMatch) {
     return res.status(401).json({
@@ -356,6 +364,26 @@ const updatePassword = asyncHandler(async (req, res) => {
     });
   }
 
+  // CHECK PASSWORD HISTORY
+  const reuesed = await isPasswordReused(newPassword, user.passwordHistory);
+  if (reuesed) {
+    return res.status(400).json({
+      message: "You cannot reuse an old password",
+    });
+  }
+
+  // SAVE CURRENT PASSWORD TO HISTORY
+  user.passwordHistory.push({
+    password: user.userPassword,
+    changedAt: new Date(),
+  });
+
+  // LIMIT PASSWORD HISTORY TO LAST 5
+  if (user.passwordHistory.length > 5) {
+    user.passwordHistory.shift();
+  }
+
+  // UPDATE TO NEW PASSWORD
   user.userPassword = await bcrypt.hash(newPassword, 10);
   await user.save();
 
@@ -366,6 +394,7 @@ const updatePassword = asyncHandler(async (req, res) => {
     message: passwordChangedEmail(user.userName),
   });
 
+  // LOGOUT USER BY INVALIDATING TOKEN
   res.status(200).json({
     message: "Password updated successfully",
   });
@@ -414,7 +443,7 @@ const deleteUser = asyncHandler(async (req, res) => {
 // Update User Profile
 const updateUserProfile = asyncHandler(async (req, res) => {
   const { userName } = req.body;
-
+debugger;
   if (!userName) {
     return res.status(400).json({
       message: "Please provide userName",
